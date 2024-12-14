@@ -69,7 +69,14 @@ make install -j4
 cd ..
 
 python -m venv myenv
-source myenv/bin/activate
+if [ -f "myenv/bin/activate" ]; then
+    source myenv/bin/activate
+elif [ -f "myenv/Scripts/activate" ]; then
+    source myenv/Scripts/activate
+else
+    echo "Error: Could not find virtual environment activation script."
+    exit 1
+fi
 python -m ensurepip
 python -m pip install gitpython
 
