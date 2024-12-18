@@ -16,17 +16,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - arch: x86
-            artifact: subconverter_linux32
-            os: ubuntu-latest
           - arch: amd64
             artifact: subconverter_linux64
-            os: ubuntu-latest
-          - arch: armv7
-            artifact: subconverter_armv7
-            os: ubuntu-latest
-          - arch: aarch64
-            artifact: subconverter_aarch64
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
     name: Linux ${{ matrix.arch }} Build
@@ -37,9 +28,12 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Add commit id into version
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: SHA=$(git rev-parse --short HEAD) && sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
       - name: Build
-        run: docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "apk add bash git nodejs npm && cd /root/workdir && chmod +x scripts/build.alpine.release.sh && bash scripts/build.alpine.release.sh"
+        run: |
+          docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "apk add bash git nodejs npm && cd /root/workdir && chmod +x scripts/build.alpine.release.sh && bash scripts/build.alpine.release.sh"
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
@@ -59,9 +53,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - arch: x86
-            artifact: subconverter_darwin64
-            os: macos-13
           - arch: arm
             artifact: subconverter_darwinarm
             os: macos-14
@@ -76,7 +67,9 @@ jobs:
           python-version: '3.11'
       - name: Add commit id into version
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: SHA=$(git rev-parse --short HEAD) && sed -i -e 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i -e 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
       - name: Build
         run: bash scripts/build.macos.release.sh
       - name: Upload
@@ -98,10 +91,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - arch: x86
-            artifact: subconverter_win32
-            env: i686
-            msystem: MINGW32
           - arch: amd64
             artifact: subconverter_win64
             env: x86_64
@@ -131,7 +120,9 @@ jobs:
           path-type: inherit
       - name: Add commit id into version
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: SHA=$(git rev-parse --short HEAD) && sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
       - name: Build
         run: bash scripts/build.windows.release.sh
       - name: Upload
@@ -158,43 +149,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Linux Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: subconverter_linux32
-          path: releases/linux32
       - name: Download Linux Artifacts 64
         uses: actions/download-artifact@v4
         with:
           name: subconverter_linux64
           path: releases/linux64
-      - name: Download Linux Artifacts ARMv7
-        uses: actions/download-artifact@v4
-        with:
-          name: subconverter_armv7
-          path: releases/armv7
-      - name: Download Linux Artifacts AArch64
-        uses: actions/download-artifact@v4
-        with:
-          name: subconverter_aarch64
-          path: releases/aarch64
 
-      - name: Download macOS Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: subconverter_darwin64
-          path: releases/darwin64
       - name: Download macOS Artifacts ARM
         uses: actions/download-artifact@v4
         with:
           name: subconverter_darwinarm
           path: releases/darwinarm
 
-      - name: Download Windows Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: subconverter_win32
-          path: releases/win32
       - name: Download Windows Artifacts 64
         uses: actions/download-artifact@v4
         with:
@@ -212,44 +178,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Linux32 Artifact
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/linux32/subconverter_linux32.tar.gz
-          asset_name: subconverter_linux32.tar.gz
-          asset_content_type: application/gzip
-
       - name: Upload Linux64 Artifact
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: releases/linux64/subconverter_linux64.tar.gz
           asset_name: subconverter_linux64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload ARMv7 Artifact
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/armv7/subconverter_armv7.tar.gz
-          asset_name: subconverter_armv7.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload AArch64 Artifact
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/aarch64/subconverter_aarch64.tar.gz
-          asset_name: subconverter_aarch64.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Darwin64 Artifact
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/darwin64/subconverter_darwin64.tar.gz
-          asset_name: subconverter_darwin64.tar.gz
           asset_content_type: application/gzip
 
       - name: Upload DarwinARM Artifact
@@ -259,14 +193,6 @@ jobs:
           asset_path: releases/darwinarm/subconverter_darwinarm.tar.gz
           asset_name: subconverter_darwinarm.tar.gz
           asset_content_type: application/gzip
-
-      - name: Upload Win32 Artifact
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/win32/subconverter_win32.zip
-          asset_name: subconverter_win32.zip
-          asset_content_type: application/zip
 
       - name: Upload Win64 Artifact
         uses: actions/upload-release-asset@v1
