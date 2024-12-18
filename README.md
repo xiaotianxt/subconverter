@@ -7,7 +7,7 @@ original git: https://github.com/xiaotianxt/subconverter
 [![Build Status](https://github.com/xiaotianxt/subconverter/actions/workflows/docker.yml/badge.svg)](https://github.com/xiaotianxt/subconverter/actions)
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/xiaotianxt/subconverter.svg)](https://github.com/xiaotianxt/subconverter/tags)
 [![GitHub release](https://img.shields.io/github/release/xiaotianxt/subconverter.svg)](https://github.com/xiaotianxt/subconverter/releases)
-[![GitHub license](https://img.shields.io/github/license/xiaotianxt/subconverter.svg)](https://github.com/tindy2013/subconverter/blob/master/LICENSE)
+[![GitHub license](https://img.shields.io/github/license/xiaotianxt/subconverter.svg)](https://github.com/xiaotianxt/subconverter/blob/master/LICENSE)
 
 [Docker README](https://github.com/xiaotianxt/subconverter/blob/master/README-docker.md)
 
@@ -21,6 +21,7 @@ original git: https://github.com/xiaotianxt/subconverter
     - [Description](#description)
   - [Advanced Usage](#advanced-usage)
   - [Auto Upload](#auto-upload)
+  - [Thanks](#thanks)
   
 ## Docker
 
@@ -138,5 +139,6 @@ Example:
 token = xxxxxxxxxxxxxxxxxxxxxxxx(Your Personal Access Token)
 ```
 ## Thanks
-[tindy2013](https://github.com/tindy2013)
-[https://github.com/tindy2013/subconverter](https://github.com/tindy2013/subconverter)
+
+- [tindy2013](https://github.com/tindy2013)
+- [https://github.com/tindy2013/subconverter](https://github.com/tindy2013/subconverter)

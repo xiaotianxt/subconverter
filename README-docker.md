@@ -32,7 +32,7 @@ For those who want to use their own `pref` configuration and/or rules, snippets,
 ```txt
 # you can save the files you want to replace to a folder, then copy it into to the docker
 # using the latest build of the official docker
-FROM tindy2013/subconverter:latest
+FROM xiaotianxt/subconverter:latest
 # assume your files are inside replacements/
 # subconverter folder is located in /base/, which has the same structure as the base/ folder in the repository
 COPY replacements/ /base/
