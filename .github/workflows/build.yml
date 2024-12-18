@@ -148,3 +148,130 @@ jobs:
         with:
           files: ${{ matrix.artifact }}.7z
           draft: true
+
+  release:
+    name: 发布构建内容
+    needs: [linux_build, macos_build, windows_build]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_linux32
+          path: releases/linux32
+      - name: Download Linux Artifacts 64
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_linux64
+          path: releases/linux64
+      - name: Download Linux Artifacts ARMv7
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_armv7
+          path: releases/armv7
+      - name: Download Linux Artifacts AArch64
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_aarch64
+          path: releases/aarch64
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_darwin64
+          path: releases/darwin64
+      - name: Download macOS Artifacts ARM
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_darwinarm
+          path: releases/darwinarm
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_win32
+          path: releases/win32
+      - name: Download Windows Artifacts 64
+        uses: actions/download-artifact@v4
+        with:
+          name: subconverter_win64
+          path: releases/win64
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux32 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/linux32/subconverter_linux32.tar.gz
+          asset_name: subconverter_linux32.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Linux64 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/linux64/subconverter_linux64.tar.gz
+          asset_name: subconverter_linux64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload ARMv7 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/armv7/subconverter_armv7.tar.gz
+          asset_name: subconverter_armv7.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload AArch64 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/aarch64/subconverter_aarch64.tar.gz
+          asset_name: subconverter_aarch64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Darwin64 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/darwin64/subconverter_darwin64.tar.gz
+          asset_name: subconverter_darwin64.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload DarwinARM Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/darwinarm/subconverter_darwinarm.tar.gz
+          asset_name: subconverter_darwinarm.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Win32 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/win32/subconverter_win32.zip
+          asset_name: subconverter_win32.zip
+          asset_content_type: application/zip
+
+      - name: Upload Win64 Artifact
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: releases/win64/subconverter_win64.zip
+          asset_name: subconverter_win64.zip
+          asset_content_type: application/zip
