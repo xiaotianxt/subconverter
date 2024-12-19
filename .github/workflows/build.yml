@@ -167,6 +167,15 @@ jobs:
           name: subconverter_win64
           path: releases/win64
 
+      - name: Package Linux64 Artifact
+        run: tar czf releases/linux64/subconverter_linux64.tar.gz -C releases/linux64 subconverter
+
+      - name: Package DarwinARM Artifact
+        run: tar czf releases/darwinarm/subconverter_darwinarm.tar.gz -C releases/darwinarm subconverter
+
+      - name: Package Win64 Artifact
+        run: 7z a releases/win64/subconverter_win64.7z releases/win64/subconverter/
+
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
@@ -198,6 +207,6 @@ jobs:
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: releases/win64/subconverter_win64.zip
-          asset_name: subconverter_win64.zip
+          asset_path: releases/win64/subconverter_win64.7z
+          asset_name: subconverter_win64.7z
           asset_content_type: application/zip
