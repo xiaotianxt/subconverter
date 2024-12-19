@@ -22,69 +22,145 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Linux ${{ matrix.arch }} Build
     steps:
-      - name: Checkout base
+      - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      - name: Add commit id into version
+
+      - name: Cache Alpine Packages
+        uses: actions/cache@v3
+        with:
+          path: /var/cache/apk
+          key: ${{ runner.os }}-apk-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-apk-
+
+      - name: Cache CMake Build
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/cmake
+            build
+          key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-
+
+      - name: Add commit ID into version
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           SHA=$(git rev-parse --short HEAD)
           sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
-      - name: Build
-        run: |
-          docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "apk add bash git nodejs npm && cd /root/workdir && chmod +x scripts/build.alpine.release.sh && bash scripts/build.alpine.release.sh"
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: subconverter/
-      - name: Package Release
-        if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
-        run: tar czf ${{ matrix.artifact }}.tar.gz subconverter
-      - name: Draft Release
-        if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.artifact }}.tar.gz
-          draft: true
 
-  macos_build:
-    strategy:
-      matrix:
-        include:
-          - arch: arm
-            artifact: subconverter_darwinarm
-            os: macos-14
-    runs-on: ${{ matrix.os }}
-    name: macOS ${{ matrix.arch }} Build
-    steps:
-      - name: Checkout base
-        uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Add commit id into version
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Install Dependencies
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          sed -i -e 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
-      - name: Build
-        run: bash scripts/build.macos.release.sh
-      - name: Upload
+          docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "
+            apk update && \
+            apk add --no-cache bash git nodejs npm gcc g++ build-base linux-headers cmake make autoconf automake libtool python2 python3 mbedtls-dev mbedtls-static zlib-dev rapidjson-dev zlib-static pcre2-dev
+          "
+
+      - name: Build Dependencies
+        run: |
+          docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "
+            cd workdir
+            set -xe
+
+            # Clone and build curl
+            git clone https://github.com/curl/curl --depth=1 --branch curl-8_4_0
+            cd curl
+            cmake -DCURL_USE_MBEDTLS=ON -DHTTP_ONLY=ON -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_USE_LIBSSH2=OFF -DBUILD_CURL_EXE=OFF . > /dev/null
+            make install -j2 > /dev/null
+            cd ..
+
+            # Clone and build yaml-cpp
+            git clone https://github.com/jbeder/yaml-cpp --depth=1
+            cd yaml-cpp
+            cmake -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF . > /dev/null
+            make install -j3 > /dev/null
+            cd ..
+
+            # Clone and build quickjspp
+            git clone https://github.com/ftk/quickjspp --depth=1
+            cd quickjspp
+            cmake -DCMAKE_BUILD_TYPE=Release .
+            make quickjs -j3 > /dev/null
+            install -d /usr/lib/quickjs/
+            install -m644 quickjs/libquickjs.a /usr/lib/quickjs/
+            install -d /usr/include/quickjs/
+            install -m644 quickjs/quickjs.h quickjs/quickjs-libc.h /usr/include/quickjs/
+            install -m644 quickjspp.hpp /usr/include/
+            cd ..
+
+            # Clone and build libcron
+            git clone https://github.com/PerMalmberg/libcron --depth=1
+            cd libcron
+            git submodule update --init
+            cmake -DCMAKE_BUILD_TYPE=Release .
+            make libcron install -j3
+            cd ..
+
+            # Clone and build toml11
+            git clone https://github.com/ToruNiina/toml11 --branch='v3.7.1' --depth=1
+            cd toml11
+            cmake -DCMAKE_CXX_STANDARD=11 .
+            make install -j4 > /dev/null
+            cd ..
+          "
+
+      - name: Cache Pip
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install Python Dependencies
+        run: |
+          python3 -m ensurepip
+          python3 -m pip install --upgrade pip
+          python3 -m pip install gitpython
+
+      - name: Update Rules
+        run: |
+          python3 scripts/update_rules.py -c scripts/rules_config.conf
+
+      - name: Build Project
+        run: |
+          docker run --rm -v $GITHUB_WORKSPACE:/root/workdir multiarch/alpine:${{ matrix.arch }}-latest-stable /bin/sh -c "
+            cd workdir
+            set -xe
+
+            export PKG_CONFIG_PATH=/usr/lib64/pkgconfig
+            cmake -DCMAKE_BUILD_TYPE=Release .
+            make -j3
+            rm subconverter
+            g++ -o base/subconverter $(find CMakeFiles/subconverter.dir/src/ -name '*.o') -static -lpcre2-8 -lyaml-cpp -L/usr/lib64 -lcurl -lmbedtls -lmbedcrypto -lmbedx509 -lz -l:quickjs/libquickjs.a -llibcron -O3 -s
+          "
+
+      - name: Prepare Subconverter Artifact
+        run: |
+          cd base
+          chmod +rx subconverter
+          chmod +r ./*
+          cd ..
+          mv base subconverter
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: subconverter/
+
       - name: Package Release
         if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
-        run: tar czf ${{ matrix.artifact }}.tar.gz subconverter
+        run: tar czf subconverter/${{ matrix.artifact }}.tar.gz subconverter
+
       - name: Draft Release
         if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact }}.tar.gz
+          files: subconverter/${{ matrix.artifact }}.tar.gz
           draft: true
 
   windows_build:
@@ -103,41 +179,280 @@ jobs:
     steps:
       - name: Checkout base
         uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
+
+      - name: Cache MSYS2 Packages
+        uses: actions/cache@v3
         with:
-          python-version: '3.11'
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '16'
+          path: /msys64/cache
+          key: ${{ runner.os }}-msys2-${{ matrix.env }}-${{ hashFiles('**/scripts/build.windows.release.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-msys2-${{ matrix.env }}-
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           update: true
-          install: base-devel git mingw-w64-${{ matrix.env }}-gcc mingw-w64-${{ matrix.env }}-cmake mingw-w64-${{ matrix.env }}-pcre2 patch
+          install: |
+            base-devel
+            mingw-w64-${{ matrix.env }}-gcc
+            mingw-w64-${{ matrix.env }}-cmake
+            mingw-w64-${{ matrix.env }}-pcre2
+            patch
           msystem: ${{ matrix.msystem }}
           path-type: inherit
+
+      - name: Cache CMake Build
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/cmake
+            build
+          key: ${{ runner.os }}-cmake-windows-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-windows-
+
       - name: Add commit id into version
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
           SHA=$(git rev-parse --short HEAD)
           sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
-      - name: Build
-        run: bash scripts/build.windows.release.sh
-      - name: Upload
+
+      - name: Install Dependencies
+        run: |
+          pacman -S --needed --noconfirm base-devel mingw-w64-${{ matrix.env }}-toolchain mingw-w64-${{ matrix.env }}-cmake mingw-w64-${{ matrix.env }}-nghttp2 mingw-w64-${{ matrix.env }}-openssl
+
+      - name: Build Dependencies
+        run: |
+          set -e
+          # Clone and build curl
+          git clone https://github.com/curl/curl --depth=1 --branch curl-8_8_0
+          cd curl
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCURL_USE_LIBSSH2=OFF \
+                -DHTTP_ONLY=ON \
+                -DCURL_USE_SCHANNEL=ON \
+                -DBUILD_SHARED_LIBS=OFF \
+                -DBUILD_CURL_EXE=OFF \
+                -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" \
+                -G "Unix Makefiles" \
+                -DHAVE_LIBIDN2=OFF \
+                -DCURL_USE_LIBPSL=OFF \
+                -DCURL_STATICLIB=ON \
+                -DCURL_DISABLE_SOCKETPAIR=ON \
+                -DCURL_DISABLE_NONBLOCKING=ON .
+          make install -j4
+          cd ..
+
+          # Clone and build yaml-cpp
+          git clone https://github.com/jbeder/yaml-cpp --depth=1
+          cd yaml-cpp
+          cmake -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" .
+          make install -j4
+          cd ..
+
+          # Clone and build quickjspp with patch
+          git clone https://github.com/ftk/quickjspp --depth=1
+          cd quickjspp
+          patch quickjs/quickjs-libc.c -i ../scripts/patches/0001-quickjs-libc-add-realpath-for-Windows.patch
+          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release .
+          make quickjs -j4
+          install -d "$MINGW_PREFIX/lib/quickjs/"
+          install -m644 quickjs/libquickjs.a "$MINGW_PREFIX/lib/quickjs/"
+          install -d "$MINGW_PREFIX/include/quickjs"
+          install -m644 quickjs/quickjs.h quickjs/quickjs-libc.h "$MINGW_PREFIX/include/quickjs/"
+          install -m644 quickjspp.hpp "$MINGW_PREFIX/include/"
+          cd ..
+
+          # Clone and build libcron
+          git clone https://github.com/PerMalmberg/libcron --depth=1
+          cd libcron
+          git submodule update --init
+          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" .
+          make libcron install -j4
+          cd ..
+
+          # Clone and build rapidjson
+          git clone https://github.com/Tencent/rapidjson --depth=1
+          cd rapidjson
+          cmake -DRAPIDJSON_BUILD_DOC=OFF -DRAPIDJSON_BUILD_EXAMPLES=OFF -DRAPIDJSON_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" .
+          make install -j4
+          cd ..
+
+          # Clone and build toml11
+          git clone https://github.com/ToruNiina/toml11 --branch="v3.7.1" --depth=1
+          cd toml11
+          cmake -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" -DCMAKE_CXX_STANDARD=11 .
+          make install -j4
+          cd ..
+      - name: Setup Python Environment
+        run: |
+          python -m venv myenv
+          if [ -f "myenv/bin/activate" ]; then
+              source myenv/bin/activate
+          elif [ -f "myenv/Scripts/activate" ]; then
+              source myenv/Scripts/activate
+          else
+              echo "Error: Could not find virtual environment activation script."
+              exit 1
+          fi
+          python -m ensurepip
+          python -m pip install --upgrade pip
+          python -m pip install gitpython
+
+      - name: Update Rules
+        run: |
+          python scripts/update_rules.py -c scripts/rules_config.conf
+
+      - name: Build Project
+        run: |
+          rm -f C:/Strawberry/perl/bin/pkg-config C:/Strawberry/perl/bin/pkg-config.bat
+          cmake -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" .
+          make -j4
+          rm subconverter.exe
+          g++ $(find CMakeFiles/subconverter.dir/src -name "*.obj") curl/lib/libcurl.a -o base/subconverter.exe -static -lbcrypt -lpcre2-8 -l:quickjs/libquickjs.a -llibcron -lyaml-cpp -liphlpapi -lcrypt32 -lws2_32 -lwsock32 -lz -s
+
+      - name: Prepare Subconverter Artifact
+        run: |
+          mv base subconverter
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: subconverter/
+
       - name: Package Release
         if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
-        run: 7z a ${{ matrix.artifact }}.7z subconverter/
+        run: 7z a subconverter/${{ matrix.artifact }}.7z subconverter/
+
       - name: Draft Release
         if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact }}.7z
+          files: subconverter/${{ matrix.artifact }}.7z
+          draft: true
+
+  macos_build:
+    strategy:
+      matrix:
+        include:
+          - arch: arm
+            artifact: subconverter_darwinarm
+            os: macos-14
+    runs-on: ${{ matrix.os }}
+    name: macOS ${{ matrix.arch }} Build
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+
+      - name: Cache CMake Build
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/cmake
+            build
+          key: ${{ runner.os }}-cmake-macos-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-cmake-macos-
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Add commit id into version
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i -e 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
+
+      - name: Install Dependencies
+        run: |
+          brew reinstall rapidjson zlib pcre2 pkgconfig
+
+      - name: Clone and Build Dependencies
+        run: |
+          set -xe
+
+          # Clone and build yaml-cpp
+          git clone https://github.com/jbeder/yaml-cpp --depth=1
+          cd yaml-cpp
+          cmake -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF . > /dev/null
+          make install -j6 > /dev/null
+          cd ..
+
+          # Clone and build quickjspp
+          git clone https://github.com/ftk/quickjspp --depth=1
+          cd quickjspp
+          cmake -DCMAKE_BUILD_TYPE=Release .
+          make quickjs -j6 > /dev/null
+          sudo install -d /usr/local/lib/quickjs/
+          sudo install -m644 quickjs/libquickjs.a /usr/local/lib/quickjs/
+          sudo install -d /usr/local/include/quickjs/
+          sudo install -m644 quickjs/quickjs.h quickjs/quickjs-libc.h /usr/local/include/quickjs/
+          sudo install -m644 quickjspp.hpp /usr/local/include/
+          cd ..
+
+          # Clone and build libcron
+          git clone https://github.com/PerMalmberg/libcron --depth=1
+          cd libcron
+          git submodule update --init
+          cmake -DCMAKE_BUILD_TYPE=Release .
+          make libcron -j6
+          sudo install -m644 libcron/out/Release/liblibcron.a /usr/local/lib/
+          sudo install -d /usr/local/include/libcron/
+          sudo install -m644 libcron/include/libcron/* /usr/local/include/libcron/
+          sudo install -d /usr/local/include/date/
+          sudo install -m644 libcron/externals/date/include/date/* /usr/local/include/date/
+          cd ..
+
+          # Clone and build toml11
+          git clone https://github.com/ToruNiina/toml11 --branch="v3.7.1" --depth=1
+          cd toml11
+          cmake -DCMAKE_CXX_STANDARD=11 .
+          sudo make install -j6 > /dev/null
+          cd ..
+
+      - name: Install Python Dependencies
+        run: |
+          python3 -m ensurepip
+          python3 -m pip install gitpython
+
+      - name: Update Rules
+        run: |
+          python scripts/update_rules.py -c scripts/rules_config.conf
+
+      - name: Build Project
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release .
+          make -j6
+          rm subconverter
+          # shellcheck disable=SC2046
+          c++ -Xlinker -unexported_symbol -Xlinker "*" -o base/subconverter -framework CoreFoundation -framework Security $(find CMakeFiles/subconverter.dir/src/ -name "*.o") "$(brew --prefix zlib)/lib/libz.a" "$(brew --prefix pcre2)/lib/libpcre2-8.a" $(find . -name "*.a") -lcurl -O3
+
+      - name: Prepare Subconverter Artifact
+        run: |
+          cd base
+          chmod +rx subconverter
+          chmod +r ./*
+          cd ..
+          mv base subconverter
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: subconverter/
+
+      - name: Package Release
+        if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
+        run: tar czf subconverter/${{ matrix.artifact }}.tar.gz subconverter
+
+      - name: Draft Release
+        if: ${{ github.event_name != 'pull_request' && startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: subconverter/${{ matrix.artifact }}.tar.gz
           draft: true
 
   release:
